@@ -166,6 +166,9 @@ public class APIConstants {
         public static final String FAILOVER_ENDPOINTS = "FAILOVER_ENDPOINTS";
         public static final String REJECT_ENDPOINT = "REJECT";
         public static final String DEFAULT_ENDPOINT = "DEFAULT";
+        public static final String LLM_TARGET_MODEL_ENDPOINT = "LLM_TARGET_MODEL_ENDPOINT";
+        public static final String LLM_ROUTE_CONFIGS_ENDPOINT = "LLM_ROUTE_CONFIGS_ENDPOINT";
+        public static final String LLM_ROUTE_CONFIGS = "LLM_ROUTE_CONFIGS";
         public static final String EXIT_ENDPOINT = "EXIT";
         public static final String REQUEST_PAYLOAD = "REQUEST_PAYLOAD";
         public static final String REQUEST_HEADERS = "REQUEST_HEADERS";

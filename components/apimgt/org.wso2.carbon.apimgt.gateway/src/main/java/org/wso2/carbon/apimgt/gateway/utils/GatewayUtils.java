@@ -53,11 +53,7 @@ import org.apache.synapse.transport.passthru.PassThroughConstants;
 import org.apache.synapse.transport.passthru.Pipe;
 import org.wso2.carbon.apimgt.api.APIManagementException;
 import org.wso2.carbon.apimgt.api.ExceptionCodes;
-import org.wso2.carbon.apimgt.api.gateway.FailoverPolicyConfigDTO;
-import org.wso2.carbon.apimgt.api.gateway.FailoverPolicyDeploymentConfigDTO;
-import org.wso2.carbon.apimgt.api.gateway.GatewayAPIDTO;
-import org.wso2.carbon.apimgt.api.gateway.ModelEndpointDTO;
-import org.wso2.carbon.apimgt.api.gateway.RBPolicyConfigDTO;
+import org.wso2.carbon.apimgt.api.gateway.*;
 import org.wso2.carbon.apimgt.common.gateway.constants.JWTConstants;
 import org.wso2.carbon.apimgt.common.gateway.dto.JWTInfoDto;
 import org.wso2.carbon.apimgt.common.gateway.dto.JWTValidationInfo;
@@ -97,6 +93,7 @@ import org.wso2.carbon.user.core.UserCoreConstants;
 import org.wso2.carbon.utils.CarbonUtils;
 import org.wso2.carbon.utils.multitenancy.MultitenantConstants;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
+import org.wso2.carbon.apimgt.api.gateway.LLMRPolicyConfigDTO;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
@@ -1859,5 +1856,89 @@ public class GatewayUtils {
             }
         }
         return false;
+    }
+    /**
+     * Retrieves the appropriate LLM routing policy configuration (Production/Sandbox).
+     *
+     * @param messageContext The Synapse message context containing the API key type.
+     * @param policyConfig   The LLM routing policy configuration DTO.
+     * @return The appropriate deployment configuration, or null if invalid.
+     */
+    public static LLMRPolicyConfigDTO.LLMRDeploymentConfigDTO getLLMTargetConfig(org.apache.synapse.MessageContext messageContext,
+                                                                                 LLMRPolicyConfigDTO policyConfig) {
+        if (policyConfig == null || messageContext == null) {
+            return null;
+        }
+
+        String apiKeyType = (String) messageContext.getProperty(APIConstants.API_KEY_TYPE);
+        return APIConstants.API_KEY_TYPE_PRODUCTION.equals(apiKeyType) 
+            ? policyConfig.getProduction() 
+            : policyConfig.getSandbox();
+    }
+
+    /**
+     * Selects an LLM endpoint based on category name from configurable models.
+     *
+     * @param selectedConfig The LLM deployment configuration.
+     * @param messageContext The Synapse message context.
+     * @param categoryName   The category name 
+     * @return The selected ModelEndpointDTO, or null if no suitable endpoint is available.
+     */
+    public static ModelEndpointDTO selectLLMEndpoint(LLMRPolicyConfigDTO.LLMRDeploymentConfigDTO selectedConfig,
+                                                     org.apache.synapse.MessageContext messageContext,
+                                                     String categoryName) {
+        if (selectedConfig == null || !hasValidLLMEndpoints(selectedConfig)) {
+            return null;
+        }
+
+        String apiKey = getAPIKeyForEndpoints(messageContext);
+        if (apiKey == null) {
+            return null;
+        }
+
+        ModelEndpointDTO selectedEndpoint = selectedConfig.selectEndpointForCategory(categoryName);
+        if (selectedEndpoint != null && isValidModel(selectedEndpoint)) {
+            String endpointKey = getEndpointKey(selectedEndpoint);
+            if (!DataHolder.getInstance().isEndpointSuspended(apiKey, endpointKey)) {
+                return selectedEndpoint;
+            }
+        }
+        return null;
+    }
+
+
+    /**
+     * Validates if a ModelEndpointDTO has required non-empty fields.
+     */
+    private static boolean isValidModel(ModelEndpointDTO model) {
+        return model != null && isValidString(model.getEndpointId()) && isValidString(model.getModel());
+    }
+
+    /**
+     * Utility method to check if a string is valid (not null, not empty, not just whitespace).
+     */
+    private static boolean isValidString(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    /**
+     * Validates the overall health of an LLM deployment configuration.
+     */
+    public static boolean isLLMConfigHealthy(LLMRPolicyConfigDTO.LLMRDeploymentConfigDTO config) {
+        return hasValidLLMEndpoints(config);
+    }
+
+    /**
+     * Checks if the LLM deployment configuration has valid endpoints.
+     */
+    private static boolean hasValidLLMEndpoints(LLMRPolicyConfigDTO.LLMRDeploymentConfigDTO config) {
+        if (config == null) {
+            return false;
+        }
+        
+        boolean hasValidDefault = config.getDefaultModel() != null && isValidModel(config.getDefaultModel());
+        boolean hasValidCategories = config.getCategories() != null && !config.getCategories().isEmpty();
+        
+        return hasValidDefault || hasValidCategories;
     }
 }

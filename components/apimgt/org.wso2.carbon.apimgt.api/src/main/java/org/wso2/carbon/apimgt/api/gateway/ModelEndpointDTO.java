@@ -25,7 +25,8 @@ public class ModelEndpointDTO {
 
     private String model;
     private String endpointId;
-    private double weight;
+    private double weight = 1.0;
+
 
     /**
      * Gets the model name.

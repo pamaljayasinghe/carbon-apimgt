@@ -183,6 +183,18 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
             return;
         }
 
+        Map<String, Object> llmRouteConfigs;
+        if (messageContext.getProperty(APIConstants.AIAPIConstants.LLM_ROUTE_CONFIGS) != null) {
+            llmRouteConfigs =
+                    (Map<String, Object>) messageContext.getProperty(APIConstants.AIAPIConstants.LLM_ROUTE_CONFIGS);
+            handleLoadBalancing(messageContext, providerConfiguration, llmRouteConfigs);
+            return;
+        }
+
+        if (targetEndpoint != null && !APIConstants.AIAPIConstants.DEFAULT_ENDPOINT.equals(targetEndpoint)) {
+            return;
+        }
+
         messageContext.setProperty(APIConstants.AIAPIConstants.TARGET_ENDPOINT,
                 APIConstants.AIAPIConstants.DEFAULT_ENDPOINT);
 
@@ -369,6 +381,9 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
 
         ModelEndpointDTO targetModelEndpoint =
                 (ModelEndpointDTO) roundRobinConfigs.get(APIConstants.AIAPIConstants.TARGET_MODEL_ENDPOINT);
+        if (targetModelEndpoint == null) {
+            targetModelEndpoint = (ModelEndpointDTO) roundRobinConfigs.get(APIConstants.AIAPIConstants.LLM_TARGET_MODEL_ENDPOINT);
+        }
 
         if (APIConstants.AIAPIConstants.INPUT_SOURCE_PAYLOAD.equalsIgnoreCase(targetModelMetadata.getInputSource())) {
             org.apache.axis2.context.MessageContext axis2Ctx =
@@ -525,6 +540,11 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
             roundRobinConfigs =
                     (Map<String, Object>) messageContext.getProperty(APIConstants.AIAPIConstants.ROUND_ROBIN_CONFIGS);
         }
+        Map<String, Object> llmRouteConfigs = null;
+        if (messageContext.getProperty(APIConstants.AIAPIConstants.LLM_ROUTE_CONFIGS) != null) {
+            llmRouteConfigs =
+                    (Map<String, Object>) messageContext.getProperty(APIConstants.AIAPIConstants.LLM_ROUTE_CONFIGS);
+        }
 
         Map<String, Object> failoverConfigs = null;
         if (messageContext.getProperty(APIConstants.AIAPIConstants.FAILOVER_CONFIGS) != null) {
@@ -532,7 +552,7 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
                     (Map<String, Object>) messageContext.getProperty(APIConstants.AIAPIConstants.FAILOVER_CONFIGS);
         }
 
-        if (roundRobinConfigs == null && failoverConfigs == null) {
+        if (roundRobinConfigs == null && llmRouteConfigs == null && failoverConfigs == null) {
             messageContext.setProperty(APIConstants.AIAPIConstants.TARGET_ENDPOINT,
                     APIConstants.AIAPIConstants.EXIT_ENDPOINT);
             return;
@@ -542,7 +562,7 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
                 (int) ((Axis2MessageContext) messageContext).getAxis2MessageContext()
                         .getProperty(APIMgtGatewayConstants.HTTP_SC);
 
-        if (handleSuccessfulResponse(messageContext, statusCode, providerConfigs, roundRobinConfigs, failoverConfigs)) {
+        if (handleSuccessfulResponse(messageContext, statusCode, providerConfigs, roundRobinConfigs, llmRouteConfigs, failoverConfigs)) {
             return;
         }
 
@@ -550,6 +570,16 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
             ModelEndpointDTO targetModelEndpoint =
                     (ModelEndpointDTO) roundRobinConfigs.get(APIConstants.AIAPIConstants.TARGET_MODEL_ENDPOINT);
             Long suspendDuration = (Long) roundRobinConfigs.get(APIConstants.AIAPIConstants.SUSPEND_DURATION);
+            suspendTargetEndpoint(messageContext, targetModelEndpoint.getEndpointId(), targetModelEndpoint.getModel(),
+                    suspendDuration);
+            messageContext.setProperty(APIConstants.AIAPIConstants.TARGET_ENDPOINT,
+                    APIConstants.AIAPIConstants.EXIT_ENDPOINT);
+            return;
+        }
+        if (llmRouteConfigs != null) {
+            ModelEndpointDTO targetModelEndpoint =
+                    (ModelEndpointDTO) llmRouteConfigs.get(APIConstants.AIAPIConstants.LLM_TARGET_MODEL_ENDPOINT);
+            Long suspendDuration = (Long) llmRouteConfigs.get(APIConstants.AIAPIConstants.SUSPEND_DURATION);
             suspendTargetEndpoint(messageContext, targetModelEndpoint.getEndpointId(), targetModelEndpoint.getModel(),
                     suspendDuration);
             messageContext.setProperty(APIConstants.AIAPIConstants.TARGET_ENDPOINT,
@@ -575,12 +605,14 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
      * @param statusCode            The HTTP status code of the response.
      * @param providerConfiguration The LLM provider configuration used for fetching token metadata.
      * @param roundRobinConfigs     The configuration for round robin load balancing.
+     * @param llmRouteConfigs       The configuration for LLM route handling.
      * @param failoverConfigs       The configuration for failover handling.
      * @return True if the response is successful and further processing is done, false otherwise.
      */
     private boolean handleSuccessfulResponse(MessageContext messageContext, int statusCode,
                                              LLMProviderConfiguration providerConfiguration,
                                              Map<String, Object> roundRobinConfigs,
+                                             Map<String, Object> llmRouteConfigs,
                                              Map<String, Object> failoverConfigs) {
 
         List<Integer> allowedStatusCodes = Arrays.asList(HttpStatus.SC_BAD_REQUEST,
@@ -604,6 +636,15 @@ public class AIAPIMediator extends AbstractMediator implements ManagedLifecycle 
                                 .get(APIConstants.AIAPIConstants.TARGET_MODEL_ENDPOINT);
                         Long suspendDuration = (Long) roundRobinConfigs
                                 .get(APIConstants.AIAPIConstants.SUSPEND_DURATION);
+                                suspendTargetEndpoint(messageContext, targetModelEndpoint.getEndpointId(),
+                                        targetModelEndpoint.getModel(),
+                                        suspendDuration);
+                            } else if (llmRouteConfigs != null) {
+                                ModelEndpointDTO targetModelEndpoint = (ModelEndpointDTO) llmRouteConfigs
+                                        .get(APIConstants.AIAPIConstants.LLM_TARGET_MODEL_ENDPOINT);
+                                Long suspendDuration = (Long) llmRouteConfigs
+                                        .get(APIConstants.AIAPIConstants.SUSPEND_DURATION);
+
 
                         suspendTargetEndpoint(messageContext, targetModelEndpoint.getEndpointId(),
                                 targetModelEndpoint.getModel(),
